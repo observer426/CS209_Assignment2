@@ -1,5 +1,5 @@
 package cn.edu.sustech.cs209.chatting.common;
-
+//修改时mvn install -pl chatting-common
 public class Message {
 
     private Long timestamp;

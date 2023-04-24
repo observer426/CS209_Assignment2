@@ -2,6 +2,7 @@ package cn.edu.sustech.cs209.chatting.client;
 
 import cn.edu.sustech.cs209.chatting.common.Message;
 import javafx.application.Platform;
+import javafx.beans.binding.Bindings;
 import javafx.fxml.FXML;
 import javafx.fxml.Initializable;
 import javafx.geometry.Insets;
@@ -12,19 +13,31 @@ import javafx.scene.layout.HBox;
 import javafx.stage.Stage;
 import javafx.util.Callback;
 
+import java.io.BufferedReader;
+import java.io.IOException;
+import java.io.InputStreamReader;
+import java.io.PrintWriter;
+import java.net.Socket;
 import java.net.URL;
-import java.util.Objects;
-import java.util.Optional;
-import java.util.ResourceBundle;
+import java.util.*;
 import java.util.concurrent.atomic.AtomicReference;
 
 public class Controller implements Initializable {
+    public String host = "localhost";
+    public int port = 8080;
+    public Socket socket;//链接服务器的socket
 
+    public BufferedReader br;
+    public PrintWriter pw;
+    public List<String> onlineList;
     @FXML
     ListView<Message> chatContentList;
 
+    @FXML
+    private Label currentUsername;
+    @FXML
+    private Label currentOnlineCnt;
     String username;
-
     @Override
     public void initialize(URL url, ResourceBundle resourceBundle) {
 
@@ -32,17 +45,41 @@ public class Controller implements Initializable {
         dialog.setTitle("Login");
         dialog.setHeaderText(null);
         dialog.setContentText("Username:");
-
         Optional<String> input = dialog.showAndWait();
-        if (input.isPresent() && !input.get().isEmpty()) {
+        try {
+            socket = new Socket(host, port);
+            br=new BufferedReader(new InputStreamReader(socket.getInputStream()));
+            pw = new PrintWriter(socket.getOutputStream());
+            if (input.isPresent() && !input.get().isEmpty()) {
             /*
                TODO: Check if there is a user with the same name among the currently logged-in users,
                      if so, ask the user to change the username
              */
-            username = input.get();
-        } else {
-            System.out.println("Invalid username " + input + ", exiting");
-            Platform.exit();
+                pw.println("GET_ONLINE_USER " +input.get());//指令+当前用户
+                pw.flush();
+                String resp = br.readLine();
+                onlineList = Arrays.asList(resp.split(",#")[0].split(","));
+                //client端存储online列表
+                // 用于显示,最后一位是true，重复；否则false
+                if(resp.split(",#")[1].equals("1")){
+                    Alert alert = new Alert(Alert.AlertType.WARNING);
+                    alert.setTitle("Warning");
+                    alert.setHeaderText(null);
+                    alert.setContentText("User " + input.get() + " is already logged in. Please choose a different username.");
+                    alert.showAndWait();
+                    // 递归调用initialize()方法以重新显示登录对话框
+                    initialize(url, resourceBundle);
+                }else {
+                    username = input.get();
+                    currentUsername.textProperty().bind(Bindings.concat("Current User: ").concat(username));
+                    currentOnlineCnt.textProperty().bind(Bindings.concat("Online: ").concat(onlineList.size()));
+                }
+            } else {
+                System.out.println("Invalid username " + input + ", exiting");
+                Platform.exit();
+            }
+        } catch (IOException e) {
+            System.out.println(e.getMessage());
         }
 
         chatContentList.setCellFactory(new MessageCellFactory());
@@ -55,8 +92,20 @@ public class Controller implements Initializable {
         Stage stage = new Stage();
         ComboBox<String> userSel = new ComboBox<>();
 
+        System.out.println("############");
+        pw.println("GET_ONLINE_USER " + username);//指令+当前用户
+        pw.flush();
+        String resp = "";
+        try {
+            resp = br.readLine();
+        } catch (IOException e) {
+            System.out.println(e.getMessage());
+        }
+        onlineList = Arrays.stream(resp.split(",#")[0].split(",")).toList();
         // FIXME: get the user list from server, the current user's name should be filtered out
-        userSel.getItems().addAll("Item 1", "Item 2", "Item 3");
+        userSel.getItems().addAll(onlineList.stream()
+                .filter(s -> !s.equals(username))
+                .toList());
 
         Button okBtn = new Button("OK");
         okBtn.setOnAction(e -> {
@@ -113,6 +162,8 @@ public class Controller implements Initializable {
                 public void updateItem(Message msg, boolean empty) {
                     super.updateItem(msg, empty);
                     if (empty || Objects.isNull(msg)) {
+                        setText(null);
+                        setGraphic(null);
                         return;
                     }
 
