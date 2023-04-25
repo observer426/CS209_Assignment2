@@ -11,7 +11,6 @@ import javafx.geometry.Pos;
 import javafx.scene.Scene;
 import javafx.scene.control.*;
 import javafx.scene.layout.HBox;
-import javafx.scene.paint.Color;
 import javafx.stage.Stage;
 import javafx.util.Callback;
 
@@ -23,6 +22,7 @@ import java.net.Socket;
 import java.net.URL;
 import java.util.*;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.stream.Collectors;
 
 public class Controller implements Initializable {
     public String host = "localhost";
@@ -41,7 +41,10 @@ public class Controller implements Initializable {
 
     public Chat currentChat;//当前聊天
 
+
     public List<Chat> myChat;
+
+    public List<ChatRoom> myRoom;
 
     @FXML
     public TextArea inputArea;
@@ -62,6 +65,7 @@ public class Controller implements Initializable {
         onlineList = new ArrayList<>();
         inputArea.setWrapText(true);
         myChat = new ArrayList<>();
+        myRoom = new ArrayList<>();
 
 //        chatList.setCellFactory(param -> new ListCell<String>() {
 //            @Override
@@ -127,7 +131,9 @@ public class Controller implements Initializable {
                 }
             }
             chatContentList.getItems().clear();//清除不是当前对话的msg
-            chatContentList.getItems().addAll(currentChat.getMessages());//加入之前对话的msg
+            if (currentChat!= null){
+                chatContentList.getItems().addAll(currentChat.getMessages());//加入之前对话的msg
+            }
         });
 
         chatContentList.setCellFactory(new MessageCellFactory());
@@ -172,13 +178,32 @@ public class Controller implements Initializable {
             //不存在，则创建新的chat
             if (!test) {
                 System.out.println("no exist");
-                Chat c = new Chat(sendBy, sendTo);
-                myChat.add(c);
-                c.messages.add(new Message(time, sendBy, sendTo, data));
-                Platform.runLater(()->{
-                    ObservableList<String> items = chatList.getItems();
-                    items.add(c.chatName);
-                });
+                //判断是否为room
+                System.out.println(sendBy);
+                if(sendBy.matches(".*\\(\\d+\\)$")){
+                    String member = msg.split("@")[5];
+                    String realSend = msg.split("@")[6];
+                    System.out.println(realSend);
+                    member = member.substring(1, member.length() - 1);
+                    List<String> strArray = Arrays.stream(member.split(",")).toList();
+                    ChatRoom chatRoom = new ChatRoom(sendBy, strArray);
+                    myRoom.add(chatRoom);
+                    chatRoom.messages.add(new Message(time, realSend, sendTo, data));
+                    Platform.runLater(()->{
+                        ObservableList<String> items = chatList.getItems();
+                        items.add(chatRoom.chatName);
+                        currentChat = chatRoom;
+                    });
+                }else {
+                    Chat c = new Chat(sendBy, sendTo);
+                    myChat.add(c);
+                    c.messages.add(new Message(time, sendBy, sendTo, data));
+                    Platform.runLater(()->{
+                        ObservableList<String> items = chatList.getItems();
+                        items.add(c.chatName);
+                        currentChat = c;
+                    });
+                }
             }
 
         } else if (msg.split("!")[0].equals("UPDATE")) {//更新用户列表
@@ -251,6 +276,73 @@ public class Controller implements Initializable {
      */
     @FXML
     public void createGroupChat() {
+        Stage stage = new Stage();
+        HBox hbox = new HBox(); // 创建一个水平箱子
+        List<String> selectedUsers = new ArrayList<>(); // 用于记录所有选中的用户
+        for (String s: onlineList
+             ) {
+            if (s.equals(username)){
+                continue;
+            }
+            CheckBox ck = new CheckBox(s);
+            hbox.getChildren().add(ck);
+            ck.setOnAction(e -> {
+                if (ck.isSelected()) {
+                    selectedUsers.add(s);
+                } else {
+                    selectedUsers.remove(s);
+                }
+            });
+        }
+
+        Button okBtn = new Button("OK");
+        okBtn.setOnAction(e -> {
+            selectedUsers.add(username);
+            System.out.println("Selected users: " + selectedUsers);
+            ObservableList<String> items = chatList.getItems();
+            //如果当前用户没有和所选用户私聊过，直接在当前对话框显示，只不过是message的更改
+            boolean exist = false;
+            for ( ChatRoom c: myRoom
+            ) {
+                if (c.total.equals(selectedUsers)){//群里成员一样
+                    chatContentList.getItems().clear();//清除不是当前对话的msg
+                    chatContentList.getItems().addAll(c.getMessages());//加入之前对话的msg
+                    exist = true;
+                    currentChat = c;
+                    break;
+                }
+            }
+            if(!exist){
+                StringBuilder sb = new StringBuilder();//name
+                if (selectedUsers.size() > 3){
+                    sb.append(selectedUsers.get(0)).append(", ")
+                            .append(selectedUsers.get(1)).append(", ")
+                            .append(selectedUsers.get(2)).append("...(")
+                            .append(selectedUsers.size()).append(")");
+                }else {
+                    for (String s: selectedUsers
+                         ) {
+                        sb.append(s).append(",");
+                    }
+                    sb.deleteCharAt(sb.length()-1);
+                    sb.append("(").append(selectedUsers.size()).append(")");
+                }
+                ChatRoom c = new ChatRoom(sb.toString(),selectedUsers);
+                myRoom.add(c);
+                currentChat = c;
+                items.add(sb.toString());
+            }
+            stage.close();
+
+        });
+        Label label = new Label("Choose users"); // 创建一个标签
+        label.setWrapText(true); // 设置标签文本是否支持自动换行
+        hbox.setAlignment(Pos.CENTER);
+        hbox.setPadding(new Insets(30, 30, 30, 30));
+        hbox.getChildren().add(okBtn);
+
+        stage.setScene(new Scene(hbox));
+        stage.showAndWait();
     }
 
     /**
@@ -264,18 +356,38 @@ public class Controller implements Initializable {
         // TODO
         System.out.println("send btn");
         String text = inputArea.getText();
-        System.out.println(currentChat);
         if (text != null && !text.trim().isEmpty()){
-            //发送message,接收方判断是否存在该聊天，没有则创建一个，有就跳转到，同时加入消息提示。
-            Message message = new Message(System.currentTimeMillis(),
-                    username, currentChat.chatName, text);
-            currentChat.messages.add(message);
-            pw.println("SINGLE_CHAT@" + message.getTimestamp()+ "@" + message.getSentBy() + "@" + message.getSendTo() + "@"
-                    + text.replaceAll("\n", "&"));
-            pw.flush();
-            chatContentList.getItems().clear();//清除不是当前对话的msg
-            chatContentList.getItems().addAll(currentChat.getMessages());
-            inputArea.clear();
+            System.out.println(currentChat.chatName);
+            if (currentChat.chatName.matches(".*\\(\\d+\\)$")){
+                //room!
+                ChatRoom room = (ChatRoom) currentChat;
+                for (String s: room.total
+                     ) {
+                    if (!s.equals(username)){
+                        Message message = new Message(System.currentTimeMillis(), username, s, text);
+                        room.messages.add(message);
+                        pw.println("SINGLE_CHAT@" + message.getTimestamp()+ "@" + room.chatName
+                                + "@" + message.getSendTo() + "@"
+                                + text.replaceAll("\n", "&") + "@" + room.total
+                        + "@" + username);
+                        pw.flush();
+                        chatContentList.getItems().clear();//清除不是当前对话的msg
+                        chatContentList.getItems().addAll(room.getMessages().get(0));//
+                        inputArea.clear();
+                    }
+                }
+            }else {
+                //发送message,接收方判断是否存在该聊天，没有则创建一个，有就跳转到，同时加入消息提示。
+                Message message = new Message(System.currentTimeMillis(),
+                        username, currentChat.chatName, text);
+                currentChat.messages.add(message);
+                pw.println("SINGLE_CHAT@" + message.getTimestamp()+ "@" + message.getSentBy() + "@" + message.getSendTo() + "@"
+                        + text.replaceAll("\n", "&"));
+                pw.flush();
+                chatContentList.getItems().clear();//清除不是当前对话的msg
+                chatContentList.getItems().addAll(currentChat.getMessages());
+                inputArea.clear();
+            }
         }else{
             Alert alert = new Alert(Alert.AlertType.WARNING);
             alert.setTitle("Empty message");
