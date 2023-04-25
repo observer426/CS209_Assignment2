@@ -152,11 +152,11 @@ public class Controller implements Initializable {
     public void handleMsg(String msg){
         if (msg.split("@")[0].equals("SINGLE_CHAT")) {
             //接收者正好反过来
-            System.out.println("!!!!!!!!");
             Long time = Long.parseLong(msg.split("@")[1]);
             String sendBy = msg.split("@")[2];
             String sendTo = msg.split("@")[3];
-            String data = msg.split("@")[4];
+            String data = msg.split("@")[4].replaceAll("&", "\n");
+            System.out.println(data);
             boolean test = false;
             for (Chat c : myChat
             ) {
@@ -271,7 +271,7 @@ public class Controller implements Initializable {
                     username, currentChat.chatName, text);
             currentChat.messages.add(message);
             pw.println("SINGLE_CHAT@" + message.getTimestamp()+ "@" + message.getSentBy() + "@" + message.getSendTo() + "@"
-                    + text);
+                    + text.replaceAll("\n", "&"));
             pw.flush();
             chatContentList.getItems().clear();//清除不是当前对话的msg
             chatContentList.getItems().addAll(currentChat.getMessages());

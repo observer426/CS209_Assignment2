@@ -92,7 +92,7 @@ public class Server {
                 if (msg.split("@")[0].equals("SINGLE_CHAT")) {
                     //私聊模式，传递信息给server，server直接传递给客户端B
                     String user = msg.split("@")[3];
-                    System.out.println(onlineUsers);
+                    System.out.println(msg);
                     for (User u : onlineUsers
                     ) {
                         if (u.username.equals(user)) {
