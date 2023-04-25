@@ -9,7 +9,7 @@ public class Main {
         System.out.println("Starting server");
         try {
             server.waitUser();
-        } catch (IOException e) {
+        } catch (Exception e) {
             System.out.println(e.getMessage());
         }
     }

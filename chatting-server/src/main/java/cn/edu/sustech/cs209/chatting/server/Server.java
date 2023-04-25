@@ -10,12 +10,17 @@ import java.net.SocketException;
 import java.util.ArrayList;
 import java.util.List;
 
+import cn.edu.sustech.cs209.chatting.client.Chat;
+import cn.edu.sustech.cs209.chatting.client.Controller;
 import cn.edu.sustech.cs209.chatting.client.User;
 
 public class Server {
     private int port;
     public ServerSocket serverSocket;
-    public List<User> users; //用户列表
+    public List<User> onlineUsers; //用户列表
+    public List<String> names;
+
+    public List<Chat> chatList;//私聊列表
 
     public Server(int port) {
         this.port = port;
@@ -24,10 +29,12 @@ public class Server {
         } catch (IOException e) {
             throw new RuntimeException(e);
         }
-        this.users = new ArrayList<>();
+        this.onlineUsers = new ArrayList<>();
+        this.chatList = new ArrayList<>();
+        this.names = new ArrayList<>();
     }
 
-    public void waitUser() throws IOException {
+    public void waitUser() {
         while (true) {
             try {
                 Socket socket = serverSocket.accept();
@@ -35,13 +42,15 @@ public class Server {
                 //服务器处理用户发来信息，一个线程对应一个客户
                 ServerThread serverThread = new ServerThread(socket);
                 serverThread.start();
-            }catch (IOException e){
+            } catch (Exception e) {
                 System.out.println(e.getMessage());
                 break;
             }
         }
     }
+
     class ServerThread extends Thread {
+        public String name;
         public Socket socket;
         public BufferedReader br;
         public PrintWriter pw;
@@ -57,64 +66,73 @@ public class Server {
         }
 
         public void run() {
-            String msg="";
+            String msg = "";
             try {
-                //默认msg最后一位为用户
-                while(true){
+                while (true) {
                     msg = br.readLine();
                     System.out.println(msg);
                     handleMsg(msg);
                 }
             } catch (SocketException se) {
-                System.out.println("该用户断开");
-                for (User u: users
-                     ) {
-                    if (msg.split(" ")[1].equals(u.username)){
-                        u.isOnline = false;
-                    }
-                }
+                System.out.println(name + "该用户断开");
+                //更新所有用户的onlineList
+                onlineUsers = onlineUsers.stream()
+                        .filter(user -> !user.username.equals(name)).toList();
+                names = names.stream()
+                        .filter(n -> !n.equals(name)).toList();
+                handleMsg("delete");
             } catch (Exception e) {
-                e.printStackTrace();
+                System.out.println(e.getMessage());
             }
         }
 
         public void handleMsg(String msg) {
             //处理各种请求
             try {
-                if (msg.split(" ")[0].equals("GET_ONLINE_USER")) {
-                    StringBuilder sb = new StringBuilder();
-                    //判断是否为新的用户，如果是就new一个，如果不是就重新设置用户的socket,br,pw,都要新开一个线程
-                    //同时返回在线user的name用于客户端显示，返回对于是否要重新登录的判断
-                    int test = 0; //0:创建新用户  1：在线用户  2：未在线老用户
-                    String name = msg.split(" ")[1];
-                    for (User u : users
+                if (msg.split("@")[0].equals("SINGLE_CHAT")) {
+                    //私聊模式，传递信息给server，server直接传递给客户端B
+                    String user = msg.split("@")[3];
+                    System.out.println(onlineUsers);
+                    for (User u : onlineUsers
                     ) {
-                        if (u.username.equals(name) && u.isOnline) {//存在相同的用户而且在线
-                            test = 1;
-                            break;
-                        } else if (u.username.equals(name)) {//相同用户但是不在线,设置为在线
-                            u.socket = socket;
-                            u.br = br;
-                            u.pw = pw;
-                            u.isOnline = true;
-                            test = 2;
-                            break;
+                        if (u.username.equals(user)) {
+                            u.pw.println(msg);
+                            u.pw.flush();
                         }
                     }
-                    if(test == 0){
-                        User user = new User(name,socket);
-                        user.isOnline = true;
-                        users.add(user);
+
+                } else if (msg.split(" ")[0].equals("update")) {//加入一个新的用户
+                    String name = msg.split(" ")[1];
+                    this.name = name;
+                    User user = new User(name, socket, br, pw);
+                    onlineUsers.add(user);
+                    names.add(name);
+                    System.out.println(names);
+                    StringBuilder sb = new StringBuilder();
+                    for (String s : names
+                    ) {
+                        sb.append(s).append(",");
                     }
-                    for (User u: users
-                         ) {
-                        if (u.isOnline) {//当前在线用户（一定包括自己）
-                            sb.append(u.username).append(",");
-                        }
+                    sb.deleteCharAt(sb.length() - 1);
+                    for (User u : onlineUsers
+                    ) {
+                        //所有的客户端更新user
+                        u.pw.println("UPDATE!" + sb);
+                        u.pw.flush();
                     }
-                    sb.append("#").append(test);
-                    pw.println(sb);
-                    pw.flush();
+                } else if (msg.equals("delete")) {
+                    StringBuilder sb = new StringBuilder();
+                    for (String s : names
+                    ) {
+                        sb.append(s).append(",");
+                    }
+                    sb.deleteCharAt(sb.length() - 1);
+                    for (User u : onlineUsers
+                    ) {
+                        //所有的客户端更新user
+                        u.pw.println("UPDATE!" + sb);
+                        u.pw.flush();
+                    }
                 }
             } catch (Exception e) {
                 e.printStackTrace();

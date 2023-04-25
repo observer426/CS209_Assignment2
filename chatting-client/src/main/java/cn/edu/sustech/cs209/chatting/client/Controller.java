@@ -3,16 +3,15 @@ package cn.edu.sustech.cs209.chatting.client;
 import cn.edu.sustech.cs209.chatting.common.Message;
 import javafx.application.Platform;
 import javafx.beans.binding.Bindings;
-import javafx.collections.FXCollections;
 import javafx.collections.ObservableList;
 import javafx.fxml.FXML;
 import javafx.fxml.Initializable;
 import javafx.geometry.Insets;
 import javafx.geometry.Pos;
-import javafx.scene.Node;
 import javafx.scene.Scene;
 import javafx.scene.control.*;
 import javafx.scene.layout.HBox;
+import javafx.scene.paint.Color;
 import javafx.stage.Stage;
 import javafx.util.Callback;
 
@@ -28,6 +27,7 @@ import java.util.concurrent.atomic.AtomicReference;
 public class Controller implements Initializable {
     public String host = "localhost";
     public int port = 8080;
+
     public Socket socket;//链接服务器的socket
 
     public BufferedReader br;
@@ -42,7 +42,6 @@ public class Controller implements Initializable {
     public Chat currentChat;//当前聊天
 
     public List<Chat> myChat;
-//    public Map<String, SplitPane> chatWindows;
 
     @FXML
     public TextArea inputArea;
@@ -50,7 +49,7 @@ public class Controller implements Initializable {
     private Label currentUsername;
     @FXML
     private Label currentOnlineCnt;
-    String username;
+    public String username;
     @Override
     public void initialize(URL url, ResourceBundle resourceBundle) {
 
@@ -59,38 +58,55 @@ public class Controller implements Initializable {
         dialog.setHeaderText(null);
         dialog.setContentText("Username:");
         Optional<String> input = dialog.showAndWait();
+
+        onlineList = new ArrayList<>();
         inputArea.setWrapText(true);
         myChat = new ArrayList<>();
+
+//        chatList.setCellFactory(param -> new ListCell<String>() {
+//            @Override
+//            protected void updateItem(String item, boolean empty) {
+//                super.updateItem(item, empty);
+//                if (!empty && item != null) {
+//                    setText(item);
+//                    // 模拟是否有消息发出的条件，此处使用随机数模拟
+//                    boolean hasMessage = ch;
+//                    if (hasMessage) {
+//                        setTextFill(Color.RED); // 设置文本颜色为红色
+//                    }
+//                } else {
+//                    setText(null);
+//                }
+//            }
+//        });
+
         try {
             socket = new Socket(host, port);
             br=new BufferedReader(new InputStreamReader(socket.getInputStream()));
             pw = new PrintWriter(socket.getOutputStream());
+            //建立一个线程来监听server的输入
+            createClientThread();
             if (input.isPresent() && !input.get().isEmpty()) {
             /*
                TODO: Check if there is a user with the same name among the currently logged-in users,
                      if so, ask the user to change the username
              */
-                pw.println("GET_ONLINE_USER " +input.get());//指令+当前用户
-                pw.flush();
-                String resp = br.readLine();
-                onlineList = Arrays.asList(resp.split(",#")[0].split(","));
-                //client端存储online列表
-                // 用于显示,最后一位是true，重复；否则false
-                if(resp.split(",#")[1].equals("1")){
-                    Alert alert = new Alert(Alert.AlertType.WARNING);
-                    alert.setTitle("Warning");
-                    alert.setHeaderText(null);
-                    alert.setContentText("User " + input.get() + " is already logged in. Please choose a different username.");
-                    alert.showAndWait();
-                    // 递归调用initialize()方法以重新显示登录对话框
-                    initialize(url, resourceBundle);
-                }else {
-                    username = input.get();
-                    Platform.runLater(()->{
-                        currentUsername.textProperty().bind(Bindings.concat("Current User: ").concat(username));
-                        currentOnlineCnt.textProperty().bind(Bindings.concat("Online: ").concat(onlineList.size()));
-                    });
+                for (String c: onlineList
+                     ) {
+                    if(c.equals(input.get())){//重复
+                        Alert alert = new Alert(Alert.AlertType.WARNING);
+                        alert.setTitle("Warning");
+                        alert.setHeaderText(null);
+                        alert.setContentText("User + "+ input.get() + " + is already logged in. " +
+                                "Please choose a different username.");
+                        alert.showAndWait();
+                        initialize(url,resourceBundle);
+                    }
                 }
+                username = input.get();
+                //更新用户列表
+                pw.println("update " + username);
+                pw.flush();
             } else {
                 System.out.println("Invalid username " + input + ", exiting");
                 Platform.exit();
@@ -98,6 +114,9 @@ public class Controller implements Initializable {
         } catch (IOException e) {
             System.out.println(e.getMessage());
         }
+        currentUsername.textProperty().bind(Bindings.concat("Current User: ").concat(username));
+
+
         chatList.setOnMouseClicked(mouseEvent -> {
             String name = chatList.getSelectionModel().getSelectedItem();
             for (Chat c: myChat
@@ -112,8 +131,63 @@ public class Controller implements Initializable {
         });
 
         chatContentList.setCellFactory(new MessageCellFactory());
+
     }
 
+    public void createClientThread(){
+        Thread receiveThread = new Thread(() -> {
+            try {
+                //处理全部的
+                while (true) {
+                    String msg = br.readLine();
+                    handleMsg(msg);
+                }
+            } catch (Exception e) {
+                System.out.println(e.getMessage());
+            }
+        });
+        receiveThread.start();
+    }
+
+    public void handleMsg(String msg){
+        if (msg.split("@")[0].equals("SINGLE_CHAT")) {
+            //接收者正好反过来
+            System.out.println("!!!!!!!!");
+            Long time = Long.parseLong(msg.split("@")[1]);
+            String sendBy = msg.split("@")[2];
+            String sendTo = msg.split("@")[3];
+            String data = msg.split("@")[4];
+            boolean test = false;
+            for (Chat c : myChat
+            ) {
+                //已经存在,只加一条msg
+                if (c.creator.equals(sendTo) && c.chatName.equals(sendBy)) {
+                    System.out.println("exist");
+                    Message message = new Message(time, sendBy, sendTo, data);
+                    c.messages.add(message);
+                    test = true;
+                    break;
+                }
+            }
+            //不存在，则创建新的chat
+            if (!test) {
+                System.out.println("no exist");
+                Chat c = new Chat(sendBy, sendTo);
+                myChat.add(c);
+                c.messages.add(new Message(time, sendBy, sendTo, data));
+                Platform.runLater(()->{
+                    ObservableList<String> items = chatList.getItems();
+                    items.add(c.chatName);
+                });
+            }
+
+        } else if (msg.split("!")[0].equals("UPDATE")) {//更新用户列表
+            onlineList = Arrays.stream(msg.split("!")[1].split(",")).toList();
+            Platform.runLater(()->{
+                currentOnlineCnt.textProperty().bind(Bindings.concat("Online: ").concat(onlineList.size()));
+            });
+        }
+    }
     @FXML
     public void createPrivateChat() {
         //私聊的user名称
@@ -121,23 +195,12 @@ public class Controller implements Initializable {
 
         Stage stage = new Stage();
         ComboBox<String> userSel = new ComboBox<>();
-
-        pw.println("GET_ONLINE_USER " + username);//指令+当前用户
-        pw.flush();
-        String resp = "";
-        try {
-            resp = br.readLine();
-        } catch (IOException e) {
-            System.out.println(e.getMessage());
-        }
-        onlineList = Arrays.stream(resp.split(",#")[0].split(",")).toList();
-        //再次更新online
-        currentOnlineCnt.textProperty().bind(Bindings.concat("Online: ").concat(onlineList.size()));
+        System.out.println(onlineList);
         // FIXME: get the user list from server, the current user's name should be filtered out
+        currentOnlineCnt.textProperty().bind(Bindings.concat("Online: ").concat(onlineList.size()));
         userSel.getItems().addAll(onlineList.stream()
                 .filter(s -> !s.equals(username))
                 .toList());
-
         Button okBtn = new Button("OK");
         okBtn.setOnAction(e -> {
             user.set(userSel.getSelectionModel().getSelectedItem());
@@ -148,7 +211,6 @@ public class Controller implements Initializable {
             for ( Chat c: myChat
                  ) {
                 if (c.chatName.equals(user.toString())){//之前聊过
-                    chatList.getSelectionModel().getSelectedItem();
                     chatContentList.getItems().clear();//清除不是当前对话的msg
                     chatContentList.getItems().addAll(c.getMessages());//加入之前对话的msg
                     exist = true;
@@ -157,7 +219,7 @@ public class Controller implements Initializable {
                 }
             }
             if(!exist){
-                Chat c = new Chat(user.toString());
+                Chat c = new Chat(user.toString(), username);
                 myChat.add(c);
                 currentChat = c;
                 items.add(user.toString());
@@ -205,10 +267,12 @@ public class Controller implements Initializable {
         System.out.println(currentChat);
         if (text != null && !text.trim().isEmpty()){
             //发送message,接收方判断是否存在该聊天，没有则创建一个，有就跳转到，同时加入消息提示。
-
             Message message = new Message(System.currentTimeMillis(),
                     username, currentChat.chatName, text);
             currentChat.messages.add(message);
+            pw.println("SINGLE_CHAT@" + message.getTimestamp()+ "@" + message.getSentBy() + "@" + message.getSendTo() + "@"
+                    + text);
+            pw.flush();
             chatContentList.getItems().clear();//清除不是当前对话的msg
             chatContentList.getItems().addAll(currentChat.getMessages());
             inputArea.clear();
@@ -219,6 +283,10 @@ public class Controller implements Initializable {
             alert.setContentText("Please enter a non-empty message before sending.");
             alert.showAndWait();
         }
+    }
+
+    public String getUsername() {
+        return username;
     }
 
     /**
