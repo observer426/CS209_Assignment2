@@ -34,7 +34,7 @@ public class Server {
         this.names = new ArrayList<>();
     }
 
-    public void waitUser() {
+    public void waitUser() throws IOException {
         while (true) {
             try {
                 Socket socket = serverSocket.accept();
@@ -42,7 +42,7 @@ public class Server {
                 //服务器处理用户发来信息，一个线程对应一个客户
                 ServerThread serverThread = new ServerThread(socket);
                 serverThread.start();
-            } catch (Exception e) {
+            } catch (IOException e) {
                 System.out.println(e.getMessage());
                 break;
             }
@@ -75,67 +75,65 @@ public class Server {
                 }
             } catch (SocketException se) {
                 System.out.println(name + "该用户断开");
-                //更新所有用户的onlineList
+                //用户断开
+            } catch (Exception e) {
+                System.out.println(e.getMessage());
+                System.out.println("用户退出");
                 onlineUsers = onlineUsers.stream()
                         .filter(user -> !user.username.equals(name)).toList();
                 names = names.stream()
                         .filter(n -> !n.equals(name)).toList();
                 handleMsg("delete");
-            } catch (Exception e) {
-                System.out.println(e.getMessage());
             }
         }
 
         public void handleMsg(String msg) {
             //处理各种请求
-            try {
-                if (msg.split("@")[0].equals("SINGLE_CHAT")) {
-                    //私聊模式，传递信息给server，server直接传递给客户端B
-                    String user = msg.split("@")[3];
-                    System.out.println(msg);
-                    for (User u : onlineUsers
-                    ) {
-                        if (u.username.equals(user)) {
-                            u.pw.println(msg);
-                            u.pw.flush();
-                        }
-                    }
 
-                } else if (msg.split(" ")[0].equals("update")) {//加入一个新的用户
-                    String name = msg.split(" ")[1];
-                    this.name = name;
-                    User user = new User(name, socket, br, pw);
-                    onlineUsers.add(user);
-                    names.add(name);
-                    System.out.println(names);
-                    StringBuilder sb = new StringBuilder();
-                    for (String s : names
-                    ) {
-                        sb.append(s).append(",");
-                    }
-                    sb.deleteCharAt(sb.length() - 1);
-                    for (User u : onlineUsers
-                    ) {
-                        //所有的客户端更新user
-                        u.pw.println("UPDATE!" + sb);
-                        u.pw.flush();
-                    }
-                } else if (msg.equals("delete")) {
-                    StringBuilder sb = new StringBuilder();
-                    for (String s : names
-                    ) {
-                        sb.append(s).append(",");
-                    }
-                    sb.deleteCharAt(sb.length() - 1);
-                    for (User u : onlineUsers
-                    ) {
-                        //所有的客户端更新user
-                        u.pw.println("UPDATE!" + sb);
+            if (msg.split("@")[0].equals("SINGLE_CHAT")) {
+                //私聊模式，传递信息给server，server直接传递给客户端B
+                String user = msg.split("@")[3];
+                System.out.println(msg);
+                for (User u : onlineUsers
+                ) {
+                    if (u.username.equals(user)) {
+                        u.pw.println(msg);
                         u.pw.flush();
                     }
                 }
-            } catch (Exception e) {
-                e.printStackTrace();
+
+            } else if (msg.split(" ")[0].equals("update")) {//加入一个新的用户
+                String name = msg.split(" ")[1];
+                this.name = name;
+                User user = new User(name, socket, br, pw);
+                onlineUsers.add(user);
+                names.add(name);
+                System.out.println(names);
+                StringBuilder sb = new StringBuilder();
+                for (String s : names
+                ) {
+                    sb.append(s).append(",");
+                }
+                sb.deleteCharAt(sb.length() - 1);
+                for (User u : onlineUsers
+                ) {
+                    //所有的客户端更新user
+                    u.pw.println("UPDATE!" + sb);
+                    u.pw.flush();
+                }
+            } else if (msg.equals("delete")) {
+                StringBuilder sb = new StringBuilder();
+                for (String s : names
+                ) {
+                    sb.append(s).append(",");
+                }
+                sb.deleteCharAt(sb.length() - 1);
+                for (User u : onlineUsers
+                ) {
+                    //所有的客户端更新user
+                    u.pw.println("UPDATE!" + sb + "!" + name);
+                    u.pw.flush();
+                }
             }
         }
     }
